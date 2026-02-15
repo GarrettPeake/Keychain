@@ -35,3 +35,6 @@ SDItemList sdGetItems(const char* folder);
 
 // Get info about a single file by full path
 SDItem sdGetItem(const char* path);
+
+// Classify a filename by extension (.jpg/.jpeg -> JPEG, .md -> MARKDOWN, else OTHER)
+SDItemType classifyFile(const char* name);

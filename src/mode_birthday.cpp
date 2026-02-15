@@ -1,7 +1,11 @@
 #include <Arduino.h>
+#include <LittleFS.h>
+#include <Preferences.h>
 #include <TJpg_Decoder.h>
 #include "modes.h"
-#include "sdcard.h"
+#include "istore.h"
+
+static Preferences prefs;
 
 #define BIRTHDAY_FOLDER "/birthday"
 #define MAX_IMAGES 32
@@ -21,7 +25,7 @@ static void showError(const char* line1, const char* line2) {
 
 static void drawCurrentImage() {
   if (imageCount == 0) {
-    showError("No images in", BIRTHDAY_FOLDER);
+    showError("No images", "Run Intake first");
     return;
   }
 
@@ -30,7 +34,7 @@ static void drawCurrentImage() {
 
   // Get image dimensions to pick a scale factor
   uint16_t w = 0, h = 0;
-  TJpgDec.getSdJpgSize(&w, &h, path);
+  TJpgDec.getFsJpgSize(&w, &h, path, LittleFS);
   if (w == 0 || h == 0) {
     showError("Failed to load", path);
     return;
@@ -48,10 +52,11 @@ static void drawCurrentImage() {
 
   tft.fillScreen(TFT_BLACK);
   TJpgDec.setJpgScale(scale);
-  // Do NOT use startWrite/endWrite here — drawSdJpg alternates between
-  // SD reads and TFT writes on the shared SPI bus. Holding TFT CS low
-  // would cause bus contention during SD reads.
-  TJpgDec.drawSdJpg(xOff, yOff, path);
+  // LittleFS reads from internal flash (not SPI), so no bus contention with TFT.
+  // startWrite/endWrite keeps TFT CS asserted for faster block rendering.
+  tft.startWrite();
+  TJpgDec.drawFsJpg(xOff, yOff, path, LittleFS);
+  tft.endWrite();
 
   // Image counter overlay
   char buf[16];
@@ -63,23 +68,25 @@ static void drawCurrentImage() {
 }
 
 static void birthdayEnter() {
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_CYAN, TFT_BLACK);
-  tft.setTextDatum(MC_DATUM);
-  tft.setTextFont(4);
-  tft.drawString("Loading...", 120, 120);
-
   imageCount = 0;
   currentImage = 0;
 
-  if (!sdIsReady()) {
-    showError("SD card not", "available");
+  if (!istoreIsReady()) {
+    showError("Storage not", "available");
     return;
   }
 
-  SDItemList items = sdGetItems(BIRTHDAY_FOLDER);
+  if (!coldStart) {
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(4);
+    tft.drawString("Loading...", 120, 120);
+  }
+
+  SDItemList items = istoreGetItems(BIRTHDAY_FOLDER);
   for (int i = 0; i < items.count && imageCount < MAX_IMAGES; i++) {
-    // Skip macOS resource fork files (._*)
+    // Skip dotfiles
     if (items.items[i].name[0] == '.') continue;
     if (items.items[i].type == SD_ITEM_JPEG) {
       snprintf(imagePaths[imageCount], sizeof(imagePaths[imageCount]),
@@ -88,8 +95,19 @@ static void birthdayEnter() {
     }
   }
 
-  Serial.printf("Birthday: found %d images\n", imageCount);
-  drawCurrentImage();
+  // Restore saved image index (clamped to valid range)
+  prefs.begin("birthday", true);  // read-only
+  currentImage = prefs.getInt("idx", 0);
+  prefs.end();
+  if (currentImage >= imageCount) currentImage = 0;
+
+  Serial.printf("Birthday: found %d images, resuming at %d\n", imageCount, currentImage + 1);
+
+  // On cold start the display already shows the correct image from before
+  // reboot (GC9A01 GRAM persists while power is maintained). Skip the redraw.
+  if (!coldStart) {
+    drawCurrentImage();
+  }
 }
 
 static void birthdayUpdate() {
@@ -103,6 +121,9 @@ static void birthdayButton(int btn) {
   } else if (btn == 2) {
     currentImage = (currentImage - 1 + imageCount) % imageCount;
   }
+  prefs.begin("birthday", false);
+  prefs.putInt("idx", currentImage);
+  prefs.end();
   drawCurrentImage();
 }
 

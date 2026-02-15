@@ -1,12 +1,16 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <Preferences.h>
 #include <TFT_eSPI.h>
 #include <TJpg_Decoder.h>
 #include "pins.h"
 #include "modes.h"
 #include "sdcard.h"
+#include "istore.h"
 
 TFT_eSPI tft = TFT_eSPI();
+bool coldStart = false;
+static Preferences modePrefs;
 
 // --- TJpg_Decoder callback: render decoded JPEG blocks to TFT ---
 bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
@@ -19,8 +23,9 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
 extern const Mode counterMode;
 extern const Mode orbitsMode;
 extern const Mode birthdayMode;
+extern const Mode intakeMode;
 
-const Mode modes[] = {birthdayMode, counterMode, orbitsMode};
+const Mode modes[] = {birthdayMode, counterMode, orbitsMode, intakeMode};
 const int modeCount = sizeof(modes) / sizeof(modes[0]);
 
 static int currentMode = 0;
@@ -38,8 +43,22 @@ struct ButtonState {
 static ButtonState btn1 = {BTN1_PIN, false, false, 0};
 static ButtonState btn2 = {BTN2_PIN, false, false, 0};
 
+static bool modeAvailable(int idx) {
+  // Intake mode requires SD card
+  if (&modes[idx] == &intakeMode && !sdIsReady()) return false;
+  return true;
+}
+
 static void switchMode(int delta) {
-  currentMode = (currentMode + delta + modeCount) % modeCount;
+  int next = currentMode;
+  for (int i = 0; i < modeCount; i++) {
+    next = (next + delta + modeCount) % modeCount;
+    if (modeAvailable(next)) break;
+  }
+  currentMode = next;
+  modePrefs.begin("mode", false);
+  modePrefs.putInt("idx", currentMode);
+  modePrefs.end();
   Serial.printf("Mode switched to: %s (%d/%d)\n", modes[currentMode].name, currentMode + 1, modeCount);
 
   // Show brief mode name overlay
@@ -104,6 +123,13 @@ void setup() {
     Serial.println("SD card not available (continuing without)");
   }
 
+  // Initialize internal storage (LittleFS)
+  if (istoreInit()) {
+    Serial.println("Internal storage ready");
+  } else {
+    Serial.println("Internal storage failed (continuing without)");
+  }
+
   // Initialize JPEG decoder
   TJpgDec.setJpgScale(1);
   TJpgDec.setSwapBytes(true);
@@ -114,9 +140,18 @@ void setup() {
   pinMode(BTN2_PIN, INPUT_PULLUP);
   Serial.println("Buttons configured (bottom=GPIO4, top=GPIO19)");
 
-  // Enter first mode
-  Serial.printf("Starting mode: %s\n", modes[currentMode].name);
+  // Restore saved mode (clamped to valid range, skip unavailable)
+  modePrefs.begin("mode", true);
+  currentMode = modePrefs.getInt("idx", 0);
+  modePrefs.end();
+  if (currentMode >= modeCount) currentMode = 0;
+  if (!modeAvailable(currentMode)) currentMode = 0;
+
+  // Enter restored mode — set coldStart so modes can skip redundant drawing
+  coldStart = true;
+  Serial.printf("Starting mode: %s (%d/%d)\n", modes[currentMode].name, currentMode + 1, modeCount);
   modes[currentMode].enter();
+  coldStart = false;
 }
 
 void loop() {
