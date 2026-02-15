@@ -32,10 +32,10 @@
 | BL        | 32   | Backlight enable |
 
 ### User Buttons
-| Button | GPIO | Notes |
-|--------|------|-------|
-| SW1    | 4    | User button, active LOW |
-| SW2    | 18   | User button, active LOW |
+| Button        | GPIO | Notes |
+|---------------|------|-------|
+| Bottom button | 4    | User button, active LOW |
+| Top button    | 19   | User button, active LOW |
 
 ### TF/SD Card (shares HSPI bus with display)
 | Signal     | GPIO | Notes |

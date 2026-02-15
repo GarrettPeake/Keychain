@@ -9,8 +9,8 @@
 // (TFT_MOSI=15, TFT_SCLK=14, TFT_CS=5, TFT_DC=27, TFT_RST=33, TFT_BL=32)
 
 // User buttons (active LOW — press pulls to GND)
-#define BTN1_PIN  4   // SW1
-#define BTN2_PIN  18  // SW2
+#define BTN1_PIN  4   // Bottom button
+#define BTN2_PIN  19  // Top button
 
 // Battery ADC (100K/100K voltage divider, requires jumper pad shorted)
 #define BAT_ADC_PIN 35
