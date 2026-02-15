@@ -7,7 +7,7 @@
 
 static Preferences prefs;
 
-#define BIRTHDAY_FOLDER "/birthday"
+#define US_FOLDER "/us"
 #define MAX_IMAGES 32
 
 static char imagePaths[MAX_IMAGES][80];
@@ -30,7 +30,7 @@ static void drawCurrentImage() {
   }
 
   const char* path = imagePaths[currentImage];
-  Serial.printf("Birthday: showing %d/%d: %s\n", currentImage + 1, imageCount, path);
+  Serial.printf("Us: showing %d/%d: %s\n", currentImage + 1, imageCount, path);
 
   // Get image dimensions to pick a scale factor
   uint16_t w = 0, h = 0;
@@ -67,7 +67,7 @@ static void drawCurrentImage() {
   tft.drawString(buf, 4, 4);
 }
 
-static void birthdayEnter() {
+static void usEnter() {
   imageCount = 0;
   currentImage = 0;
 
@@ -76,32 +76,24 @@ static void birthdayEnter() {
     return;
   }
 
-  if (!coldStart) {
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_CYAN, TFT_BLACK);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(4);
-    tft.drawString("Loading...", 120, 120);
-  }
-
-  SDItemList items = istoreGetItems(BIRTHDAY_FOLDER);
+  SDItemList items = istoreGetItems(US_FOLDER);
   for (int i = 0; i < items.count && imageCount < MAX_IMAGES; i++) {
     // Skip dotfiles
     if (items.items[i].name[0] == '.') continue;
     if (items.items[i].type == SD_ITEM_JPEG) {
       snprintf(imagePaths[imageCount], sizeof(imagePaths[imageCount]),
-               "%s/%s", BIRTHDAY_FOLDER, items.items[i].name);
+               "%s/%s", US_FOLDER, items.items[i].name);
       imageCount++;
     }
   }
 
   // Restore saved image index (clamped to valid range)
-  prefs.begin("birthday", true);  // read-only
+  prefs.begin("us", true);  // read-only
   currentImage = prefs.getInt("idx", 0);
   prefs.end();
   if (currentImage >= imageCount) currentImage = 0;
 
-  Serial.printf("Birthday: found %d images, resuming at %d\n", imageCount, currentImage + 1);
+  Serial.printf("Us: found %d images, resuming at %d\n", imageCount, currentImage + 1);
 
   // On cold start the display already shows the correct image from before
   // reboot (GC9A01 GRAM persists while power is maintained). Skip the redraw.
@@ -110,21 +102,21 @@ static void birthdayEnter() {
   }
 }
 
-static void birthdayUpdate() {
+static void usUpdate() {
   // Static display
 }
 
-static void birthdayButton(int btn) {
+static void usButton(int btn) {
   if (imageCount == 0) return;
   if (btn == 1) {
     currentImage = (currentImage + 1) % imageCount;
   } else if (btn == 2) {
     currentImage = (currentImage - 1 + imageCount) % imageCount;
   }
-  prefs.begin("birthday", false);
+  prefs.begin("us", false);
   prefs.putInt("idx", currentImage);
   prefs.end();
   drawCurrentImage();
 }
 
-extern const Mode birthdayMode = {"Birthday", birthdayEnter, birthdayUpdate, birthdayButton};
+extern const Mode usMode = {"Us", usEnter, usUpdate, usButton};

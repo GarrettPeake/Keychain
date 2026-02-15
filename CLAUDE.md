@@ -76,11 +76,14 @@ defined as a `Mode` struct with function pointers (`enter`, `update`, `onButton`
 
 ### Current modes
 
-1. **Counter** (`src/mode_counter.cpp`): "San Jose" button-counter demo with press counts.
-2. **Orbits** (`src/mode_orbits.cpp`): Animated colored dots orbiting the display center.
-   Bottom button adds/removes orbiters; top button toggles pause.
-3. **Birthday** (`src/mode_birthday.cpp`): JPEG gallery from SD card `/birthday` folder.
+1. **Us** (`src/mode_us.cpp`): JPEG gallery from LittleFS `/us` folder.
    Bottom button next image; top button previous image.
+2. **Counter** (`src/mode_counter.cpp`): "San Jose" button-counter demo with press counts.
+3. **Orbits** (`src/mode_orbits.cpp`): Animated colored dots orbiting the display center.
+   Bottom button adds/removes orbiters; top button toggles pause.
+4. **Intake** (`src/mode_intake.cpp`): Mirrors entire SD card to LittleFS. Wipes internal
+   storage, discovers all top-level folders on SD, copies all files. Only available when
+   SD card is present. Bottom button re-runs sync.
 
 ## SD Card
 
@@ -88,7 +91,7 @@ defined as a `Mode` struct with function pointers (`enter`, `update`, `onButton`
 - 1-bit SPI mode (DATA1/DATA2 not connected)
 - FAT formatted
 - Abstraction layer in `src/sdcard.h` / `src/sdcard.cpp`: `sdInit()`, `sdGetItems()`,
-  `sdGetItem()`, `sdIsReady()`
+  `sdGetItem()`, `sdIsReady()`, `classifyFile()`
 - JPEG decoding via TJpg_Decoder library (renders directly to TFT via callback)
 - SD init must happen after `tft.init()` — uses `tft.getSPIinstance()` to share bus
 

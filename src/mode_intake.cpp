@@ -5,9 +5,8 @@
 #include "sdcard.h"
 #include "istore.h"
 
-#define BIRTHDAY_FOLDER "/birthday"
 #define COPY_BUF_SIZE 4096
-#define MAX_COPY_FILES 32
+#define MAX_FOLDERS 16
 
 static enum {
   INTAKE_IDLE,
@@ -19,8 +18,8 @@ static enum {
 } intakeState;
 
 static int filesCopied = 0;
-static int filesSkipped = 0;
 static int filesTotal = 0;
+static int foldersFound = 0;
 
 static void drawProgress(int current, int total, const char* filename) {
   tft.fillRect(20, 60, 200, 120, TFT_BLACK);
@@ -80,9 +79,9 @@ static void drawResult() {
     case INTAKE_NO_FILES:
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setTextFont(4);
-      tft.drawString("No Files", 120, 100);
+      tft.drawString("No Folders", 120, 100);
       tft.setTextFont(2);
-      tft.drawString("Nothing in /birthday", 120, 140);
+      tft.drawString("No folders on SD card", 120, 140);
       break;
 
     case INTAKE_ERROR: {
@@ -92,8 +91,7 @@ static void drawResult() {
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setTextFont(2);
       char buf[40];
-      snprintf(buf, sizeof(buf), "%d copied, %d failed",
-        filesCopied, filesTotal - filesCopied - filesSkipped);
+      snprintf(buf, sizeof(buf), "%d/%d copied", filesCopied, filesTotal);
       tft.drawString(buf, 120, 120);
       snprintf(buf, sizeof(buf), "%uKB / %uKB used",
         (unsigned)(istoreUsedBytes() / 1024),
@@ -109,7 +107,7 @@ static void drawResult() {
       tft.setTextColor(TFT_WHITE, TFT_BLACK);
       tft.setTextFont(2);
       char buf[48];
-      snprintf(buf, sizeof(buf), "%d copied, %d skipped", filesCopied, filesSkipped);
+      snprintf(buf, sizeof(buf), "%d folders, %d files", foldersFound, filesCopied);
       tft.drawString(buf, 120, 110);
       snprintf(buf, sizeof(buf), "%uKB / %uKB used",
         (unsigned)(istoreUsedBytes() / 1024),
@@ -167,11 +165,27 @@ static bool copyFile(const char* srcPath, const char* dstPath) {
   return success;
 }
 
+// Count total files across all folders for progress display
+static int countFiles(char folders[][64], int folderCount) {
+  int total = 0;
+  for (int f = 0; f < folderCount; f++) {
+    char sdFolder[80];
+    snprintf(sdFolder, sizeof(sdFolder), "/%s", folders[f]);
+    SDItemList items = sdGetItems(sdFolder);
+    for (int i = 0; i < items.count; i++) {
+      if (items.items[i].name[0] == '.') continue;
+      if (items.items[i].type == SD_ITEM_DIR) continue;
+      total++;
+    }
+  }
+  return total;
+}
+
 static void runIntake() {
   tft.fillScreen(TFT_BLACK);
   filesCopied = 0;
-  filesSkipped = 0;
   filesTotal = 0;
+  foldersFound = 0;
 
   if (!sdIsReady()) {
     intakeState = INTAKE_NO_SD;
@@ -185,89 +199,86 @@ static void runIntake() {
     return;
   }
 
-  // Scan SD card
-  static SDItemList sdItems;
-  sdItems = sdGetItems(BIRTHDAY_FOLDER);
+  // Discover top-level folders on SD card root
+  static char folders[MAX_FOLDERS][64];
+  int folderCount = 0;
 
-  // Filter to valid files (skip dotfiles)
-  struct CopyEntry { char sdPath[80]; char iPath[80]; bool needsCopy; };
-  static CopyEntry entries[MAX_COPY_FILES];
-  int entryCount = 0;
-
-  for (int i = 0; i < sdItems.count && entryCount < MAX_COPY_FILES; i++) {
-    // Skip dotfiles (macOS resource forks ._*, .DS_Store, etc.)
-    if (sdItems.items[i].name[0] == '.') continue;
-
-    CopyEntry& e = entries[entryCount];
-    snprintf(e.sdPath, sizeof(e.sdPath), "%s/%s",
-      BIRTHDAY_FOLDER, sdItems.items[i].name);
-    snprintf(e.iPath, sizeof(e.iPath), "%s/%s",
-      BIRTHDAY_FOLDER, sdItems.items[i].name);
-
-    // Check if already copied (same name and size)
-    if (istoreExists(e.iPath)) {
-      SDItem existing = istoreGetItem(e.iPath);
-      e.needsCopy = (existing.size != sdItems.items[i].size);
-    } else {
-      e.needsCopy = true;
-    }
-    entryCount++;
+  SDItemList rootItems = sdGetItems("/");
+  for (int i = 0; i < rootItems.count && folderCount < MAX_FOLDERS; i++) {
+    if (rootItems.items[i].name[0] == '.') continue;
+    if (rootItems.items[i].type != SD_ITEM_DIR) continue;
+    strncpy(folders[folderCount], rootItems.items[i].name, 63);
+    folders[folderCount][63] = '\0';
+    folderCount++;
   }
 
-  filesTotal = entryCount;
+  foldersFound = folderCount;
 
-  if (entryCount == 0) {
+  if (folderCount == 0) {
     intakeState = INTAKE_NO_FILES;
     drawResult();
     return;
   }
 
-  // Count files needing copy
-  int needsCopyCount = 0;
-  for (int i = 0; i < entryCount; i++) {
-    if (entries[i].needsCopy) needsCopyCount++;
+  Serial.printf("Intake: found %d folders on SD\n", folderCount);
+  for (int f = 0; f < folderCount; f++) {
+    Serial.printf("  /%s\n", folders[f]);
   }
 
-  if (needsCopyCount == 0) {
-    filesSkipped = entryCount;
-    intakeState = INTAKE_DONE;
+  // Count total files for progress
+  filesTotal = countFiles(folders, folderCount);
+  if (filesTotal == 0) {
+    intakeState = INTAKE_NO_FILES;
     drawResult();
     return;
   }
 
-  // Ensure /birthday directory exists on LittleFS
-  if (!LittleFS.exists(BIRTHDAY_FOLDER)) {
-    LittleFS.mkdir(BIRTHDAY_FOLDER);
-  }
+  // Wipe LittleFS before mirroring
+  Serial.println("Intake: wiping internal storage...");
+  drawProgress(0, filesTotal, "Wiping storage...");
+  istoreWipe();
 
-  // Copy files with progress
+  // Copy each folder and its files
   bool anyError = false;
   int progressIndex = 0;
-  for (int i = 0; i < entryCount; i++) {
-    if (!entries[i].needsCopy) {
-      filesSkipped++;
-      continue;
-    }
 
-    progressIndex++;
-    const char* shortName = strrchr(entries[i].sdPath, '/');
-    shortName = shortName ? shortName + 1 : entries[i].sdPath;
-    drawProgress(progressIndex, needsCopyCount, shortName);
+  for (int f = 0; f < folderCount && !anyError; f++) {
+    char sdFolder[80];
+    char iFolder[80];
+    snprintf(sdFolder, sizeof(sdFolder), "/%s", folders[f]);
+    snprintf(iFolder, sizeof(iFolder), "/%s", folders[f]);
 
-    // Check free space
-    SDItem sdItem = sdGetItem(entries[i].sdPath);
-    if (sdItem.size > istoreFreeBytes()) {
-      Serial.printf("Intake: not enough space for %s (%u > %u free)\n",
-        entries[i].sdPath, sdItem.size, (unsigned)istoreFreeBytes());
-      anyError = true;
-      break;
-    }
+    // Create folder on LittleFS
+    LittleFS.mkdir(iFolder);
+    Serial.printf("Intake: mirroring %s\n", sdFolder);
 
-    if (copyFile(entries[i].sdPath, entries[i].iPath)) {
-      filesCopied++;
-    } else {
-      anyError = true;
-      break;
+    // List files in this SD folder
+    SDItemList items = sdGetItems(sdFolder);
+    for (int i = 0; i < items.count && !anyError; i++) {
+      if (items.items[i].name[0] == '.') continue;
+      if (items.items[i].type == SD_ITEM_DIR) continue;
+
+      progressIndex++;
+      drawProgress(progressIndex, filesTotal, items.items[i].name);
+
+      char srcPath[128];
+      char dstPath[128];
+      snprintf(srcPath, sizeof(srcPath), "%s/%s", sdFolder, items.items[i].name);
+      snprintf(dstPath, sizeof(dstPath), "%s/%s", iFolder, items.items[i].name);
+
+      // Check free space
+      if (items.items[i].size > istoreFreeBytes()) {
+        Serial.printf("Intake: not enough space for %s (%u > %u free)\n",
+          srcPath, items.items[i].size, (unsigned)istoreFreeBytes());
+        anyError = true;
+        break;
+      }
+
+      if (copyFile(srcPath, dstPath)) {
+        filesCopied++;
+      } else {
+        anyError = true;
+      }
     }
   }
 

@@ -22,10 +22,10 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
 // --- Mode declarations (defined in mode_*.cpp files) ---
 extern const Mode counterMode;
 extern const Mode orbitsMode;
-extern const Mode birthdayMode;
+extern const Mode usMode;
 extern const Mode intakeMode;
 
-const Mode modes[] = {birthdayMode, counterMode, orbitsMode, intakeMode};
+const Mode modes[] = {usMode, counterMode, orbitsMode, intakeMode};
 const int modeCount = sizeof(modes) / sizeof(modes[0]);
 
 static int currentMode = 0;
@@ -45,7 +45,7 @@ static ButtonState btn2 = {BTN2_PIN, false, false, 0};
 
 static bool modeAvailable(int idx) {
   // Intake mode requires SD card
-  if (&modes[idx] == &intakeMode && !sdIsReady()) return false;
+  if (strcmp(modes[idx].name, "Intake") == 0 && !sdIsReady()) return false;
   return true;
 }
 
@@ -145,10 +145,12 @@ void setup() {
   currentMode = modePrefs.getInt("idx", 0);
   modePrefs.end();
   if (currentMode >= modeCount) currentMode = 0;
-  if (!modeAvailable(currentMode)) currentMode = 0;
+  bool restored = modeAvailable(currentMode);
+  if (!restored) currentMode = 0;
 
   // Enter restored mode — set coldStart so modes can skip redundant drawing
-  coldStart = true;
+  // only when we actually restored the same mode (display RAM matches).
+  coldStart = restored;
   Serial.printf("Starting mode: %s (%d/%d)\n", modes[currentMode].name, currentMode + 1, modeCount);
   modes[currentMode].enter();
   coldStart = false;

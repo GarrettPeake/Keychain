@@ -7,6 +7,7 @@ enum SDItemType {
   SD_ITEM_NONE = 0,
   SD_ITEM_JPEG,
   SD_ITEM_MARKDOWN,
+  SD_ITEM_DIR,
   SD_ITEM_OTHER
 };
 
