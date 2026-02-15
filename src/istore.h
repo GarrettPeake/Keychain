@@ -17,6 +17,9 @@ SDItem istoreGetItem(const char* path);
 // Check if a file exists on internal storage
 bool istoreExists(const char* path);
 
+// Wipe all files and folders from internal storage
+void istoreWipe();
+
 // Storage capacity
 size_t istoreTotalBytes();
 size_t istoreUsedBytes();

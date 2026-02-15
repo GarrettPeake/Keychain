@@ -82,7 +82,7 @@ SDItemList sdGetItems(const char* folder) {
     SDItem& item = result.items[result.count];
     strncpy(item.name, file.name(), sizeof(item.name) - 1);
     item.name[sizeof(item.name) - 1] = '\0';
-    item.type = file.isDirectory() ? SD_ITEM_OTHER : classifyFile(file.name());
+    item.type = file.isDirectory() ? SD_ITEM_DIR : classifyFile(file.name());
     item.size = file.size();
     result.count++;
     file.close();
@@ -108,7 +108,7 @@ SDItem sdGetItem(const char* path) {
   const char* name = slash ? (slash + 1) : path;
   strncpy(item.name, name, sizeof(item.name) - 1);
   item.name[sizeof(item.name) - 1] = '\0';
-  item.type = file.isDirectory() ? SD_ITEM_OTHER : classifyFile(name);
+  item.type = file.isDirectory() ? SD_ITEM_DIR : classifyFile(name);
   item.size = file.size();
   file.close();
   return item;

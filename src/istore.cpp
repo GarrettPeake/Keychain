@@ -49,7 +49,7 @@ SDItemList istoreGetItems(const char* folder) {
 
     strncpy(item.name, baseName, sizeof(item.name) - 1);
     item.name[sizeof(item.name) - 1] = '\0';
-    item.type = file.isDirectory() ? SD_ITEM_OTHER : classifyFile(baseName);
+    item.type = file.isDirectory() ? SD_ITEM_DIR : classifyFile(baseName);
     item.size = file.size();
     result.count++;
     file.close();
@@ -75,7 +75,7 @@ SDItem istoreGetItem(const char* path) {
   const char* name = slash ? (slash + 1) : path;
   strncpy(item.name, name, sizeof(item.name) - 1);
   item.name[sizeof(item.name) - 1] = '\0';
-  item.type = file.isDirectory() ? SD_ITEM_OTHER : classifyFile(name);
+  item.type = file.isDirectory() ? SD_ITEM_DIR : classifyFile(name);
   item.size = file.size();
   file.close();
   return item;
@@ -84,6 +84,42 @@ SDItem istoreGetItem(const char* path) {
 bool istoreExists(const char* path) {
   if (!ready) return false;
   return LittleFS.exists(path);
+}
+
+static void removeRecursive(const char* path) {
+  File dir = LittleFS.open(path);
+  if (!dir || !dir.isDirectory()) {
+    dir.close();
+    LittleFS.remove(path);
+    return;
+  }
+  File child = dir.openNextFile();
+  while (child) {
+    // LittleFS File.name() returns full path on ESP32
+    char childPath[128];
+    strncpy(childPath, child.name(), sizeof(childPath) - 1);
+    childPath[sizeof(childPath) - 1] = '\0';
+    bool isDir = child.isDirectory();
+    child.close();
+    if (isDir) {
+      removeRecursive(childPath);
+    } else {
+      LittleFS.remove(childPath);
+    }
+    child = dir.openNextFile();
+  }
+  dir.close();
+  if (strcmp(path, "/") != 0) {
+    LittleFS.rmdir(path);
+  }
+}
+
+void istoreWipe() {
+  if (!ready) return;
+  Serial.println("istore: wiping all files...");
+  removeRecursive("/");
+  Serial.printf("istore: wipe complete, free=%uKB\n",
+    (unsigned)(istoreFreeBytes() / 1024));
 }
 
 size_t istoreTotalBytes() {
