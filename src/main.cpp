@@ -1,54 +1,84 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <TJpg_Decoder.h>
 #include "pins.h"
+#include "modes.h"
+#include "sdcard.h"
 
 TFT_eSPI tft = TFT_eSPI();
 
-// Screen center
-#define CENTER_X 120
-#define CENTER_Y 120
+// --- TJpg_Decoder callback: render decoded JPEG blocks to TFT ---
+bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+  if (y >= tft.height()) return 0;
+  tft.pushImage(x, y, w, h, bitmap);
+  return 1;
+}
 
-// Colors
-#define BG_COLOR    TFT_BLACK
-#define RING_COLOR  TFT_CYAN
-#define TEXT_COLOR  TFT_WHITE
-#define BTN_COLOR   TFT_GREEN
+// --- Mode declarations (defined in mode_*.cpp files) ---
+extern const Mode counterMode;
+extern const Mode orbitsMode;
+extern const Mode birthdayMode;
 
-int pressCount1 = 0;
-int pressCount2 = 0;
+const Mode modes[] = {birthdayMode, counterMode, orbitsMode};
+const int modeCount = sizeof(modes) / sizeof(modes[0]);
 
-void drawUI() {
-  tft.fillScreen(BG_COLOR);
+static int currentMode = 0;
 
-  // Draw a circular ring to highlight the round display shape
-  for (int r = 118; r <= 120; r++) {
-    tft.drawCircle(CENTER_X, CENTER_Y, r, RING_COLOR);
+// --- Button state tracking for long/short press detection ---
+#define LONG_PRESS_MS 500
+
+struct ButtonState {
+  int pin;
+  bool wasPressed;
+  bool longFired;      // true if long press already triggered while held
+  unsigned long pressStart;
+};
+
+static ButtonState btn1 = {BTN1_PIN, false, false, 0};
+static ButtonState btn2 = {BTN2_PIN, false, false, 0};
+
+static void switchMode(int delta) {
+  currentMode = (currentMode + delta + modeCount) % modeCount;
+  Serial.printf("Mode switched to: %s (%d/%d)\n", modes[currentMode].name, currentMode + 1, modeCount);
+
+  // Show brief mode name overlay
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextFont(4);
+  tft.drawString(modes[currentMode].name, 120, 120);
+  delay(400);
+
+  modes[currentMode].enter();
+}
+
+// Returns: 0 = no event, 1 = short press (on release), 2 = long press (while held)
+static int checkButton(ButtonState& bs) {
+  bool pressed = (digitalRead(bs.pin) == LOW);
+
+  if (pressed && !bs.wasPressed) {
+    // Just pressed — start timing (with debounce)
+    delay(30);
+    if (digitalRead(bs.pin) == LOW) {
+      bs.wasPressed = true;
+      bs.longFired = false;
+      bs.pressStart = millis();
+    }
+  } else if (pressed && bs.wasPressed && !bs.longFired) {
+    // Still held — check if threshold reached
+    if (millis() - bs.pressStart >= LONG_PRESS_MS) {
+      bs.longFired = true;
+      return 2;
+    }
+  } else if (!pressed && bs.wasPressed) {
+    // Released
+    bs.wasPressed = false;
+    if (!bs.longFired) return 1; // short press
+    // long press already fired — ignore release
   }
 
-  // Title text
-  tft.setTextColor(TEXT_COLOR, BG_COLOR);
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextFont(4);
-  tft.drawString("San Jose", CENTER_X, 40);
-
-  // Subtitle
-  tft.setTextFont(2);
-  tft.drawString("GC9A01 240x240", CENTER_X, 75);
-
-  // Button press counts
-  tft.setTextColor(BTN_COLOR, BG_COLOR);
-  tft.setTextFont(4);
-  char buf[32];
-  snprintf(buf, sizeof(buf), "Bottom: %d", pressCount1);
-  tft.drawString(buf, CENTER_X, 120);
-  snprintf(buf, sizeof(buf), "Top: %d", pressCount2);
-  tft.drawString(buf, CENTER_X, 155);
-
-  // Footer
-  tft.setTextColor(TFT_DARKGREY, BG_COLOR);
-  tft.setTextFont(2);
-  tft.drawString("Press buttons!", CENTER_X, 200);
+  return 0;
 }
 
 void setup() {
@@ -57,7 +87,7 @@ void setup() {
   Serial.println();
   Serial.println("=== ESP32 Round TFT Boot ===");
 
-  // Enable backlight (GPIO 32, active HIGH)
+  // Enable backlight
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
   Serial.println("Backlight ON (GPIO 32)");
@@ -67,50 +97,53 @@ void setup() {
   tft.setRotation(0);
   Serial.println("TFT initialized (GC9A01, 240x240)");
 
-  // Setup buttons with internal pull-ups (active LOW)
+  // Initialize SD card (shares HSPI bus via tft.getSPIinstance())
+  if (sdInit()) {
+    Serial.println("SD card ready");
+  } else {
+    Serial.println("SD card not available (continuing without)");
+  }
+
+  // Initialize JPEG decoder
+  TJpgDec.setJpgScale(1);
+  TJpgDec.setSwapBytes(true);
+  TJpgDec.setCallback(tft_output);
+
+  // Setup buttons
   pinMode(BTN1_PIN, INPUT_PULLUP);
   pinMode(BTN2_PIN, INPUT_PULLUP);
   Serial.println("Buttons configured (bottom=GPIO4, top=GPIO19)");
 
-  // Draw initial UI
-  drawUI();
-  Serial.println("UI drawn — display should be visible");
+  // Enter first mode
+  Serial.printf("Starting mode: %s\n", modes[currentMode].name);
+  modes[currentMode].enter();
 }
 
 void loop() {
-  bool redraw = false;
+  // Check buttons for short/long press
+  int b1 = checkButton(btn1);
+  int b2 = checkButton(btn2);
 
-  // Check button 1 (active LOW, simple debounce)
-  if (digitalRead(BTN1_PIN) == LOW) {
-    delay(50);  // debounce
-    if (digitalRead(BTN1_PIN) == LOW) {
-      pressCount1++;
-      Serial.printf("Bottom button pressed (%d)\n", pressCount1);
-      redraw = true;
-      // Wait for release
-      while (digitalRead(BTN1_PIN) == LOW) {
-        delay(10);
-      }
-    }
+  if (b1 == 2) {
+    // Bottom long press — previous mode
+    switchMode(-1);
+  } else if (b1 == 1) {
+    // Bottom short press — forward to mode
+    Serial.println("Bottom button short press");
+    modes[currentMode].onButton(1);
   }
 
-  // Check button 2 (active LOW, simple debounce)
-  if (digitalRead(BTN2_PIN) == LOW) {
-    delay(50);  // debounce
-    if (digitalRead(BTN2_PIN) == LOW) {
-      pressCount2++;
-      Serial.printf("Top button pressed (%d)\n", pressCount2);
-      redraw = true;
-      // Wait for release
-      while (digitalRead(BTN2_PIN) == LOW) {
-        delay(10);
-      }
-    }
+  if (b2 == 2) {
+    // Top long press — next mode
+    switchMode(1);
+  } else if (b2 == 1) {
+    // Top short press — forward to mode
+    Serial.println("Top button short press");
+    modes[currentMode].onButton(2);
   }
 
-  if (redraw) {
-    drawUI();
-  }
+  // Let current mode update (for animations)
+  modes[currentMode].update();
 
-  delay(20);
+  delay(16); // ~60fps tick
 }
