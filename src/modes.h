@@ -13,6 +13,10 @@ struct Mode {
 // Shared TFT instance (owned by main.cpp)
 extern TFT_eSPI tft;
 
+// True during the very first enter() call after boot — lets modes skip
+// redundant drawing when the display already shows the correct content.
+extern bool coldStart;
+
 // Mode registry
 extern const Mode modes[];
 extern const int modeCount;

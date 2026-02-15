@@ -8,7 +8,7 @@ extern TFT_eSPI tft;
 
 static bool ready = false;
 
-static SDItemType classifyFile(const char* name) {
+SDItemType classifyFile(const char* name) {
   const char* dot = strrchr(name, '.');
   if (!dot) return SD_ITEM_OTHER;
   if (strcasecmp(dot, ".jpg") == 0 || strcasecmp(dot, ".jpeg") == 0)
