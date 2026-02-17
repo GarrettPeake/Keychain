@@ -95,10 +95,17 @@ static void removeRecursive(const char* path) {
   }
   File child = dir.openNextFile();
   while (child) {
-    // LittleFS File.name() returns full path on ESP32
+    // child.name() may or may not include a leading slash depending on
+    // the ESP32 Arduino core version — build the full path from parent.
+    const char* name = child.name();
+    const char* base = strrchr(name, '/');
+    base = base ? (base + 1) : name;
     char childPath[128];
-    strncpy(childPath, child.name(), sizeof(childPath) - 1);
-    childPath[sizeof(childPath) - 1] = '\0';
+    if (strcmp(path, "/") == 0) {
+      snprintf(childPath, sizeof(childPath), "/%s", base);
+    } else {
+      snprintf(childPath, sizeof(childPath), "%s/%s", path, base);
+    }
     bool isDir = child.isDirectory();
     child.close();
     if (isDir) {
