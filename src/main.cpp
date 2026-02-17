@@ -24,8 +24,9 @@ extern const Mode counterMode;
 extern const Mode orbitsMode;
 extern const Mode usMode;
 extern const Mode intakeMode;
+extern const Mode poemsMode;
 
-const Mode modes[] = {usMode, counterMode, orbitsMode, intakeMode};
+const Mode modes[] = {usMode, poemsMode, counterMode, orbitsMode, intakeMode};
 const int modeCount = sizeof(modes) / sizeof(modes[0]);
 
 static int currentMode = 0;

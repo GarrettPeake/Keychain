@@ -122,6 +122,25 @@ static void drawResult() {
   }
 }
 
+// Truncate a filename to 32 chars, preserving the extension
+static void truncateName(const char* in, char* out, size_t outSize) {
+  size_t len = strlen(in);
+  if (len <= 32) {
+    strncpy(out, in, outSize);
+    out[outSize - 1] = '\0';
+    return;
+  }
+  const char* dot = strrchr(in, '.');
+  if (dot) {
+    size_t extLen = strlen(dot);        // e.g. ".md" = 3
+    size_t baseLen = 32 - extLen;       // chars left for the base
+    if (baseLen < 1) baseLen = 1;
+    snprintf(out, outSize, "%.*s%s", (int)baseLen, in, dot);
+  } else {
+    snprintf(out, outSize, "%.32s", in);
+  }
+}
+
 static bool copyFile(const char* srcPath, const char* dstPath) {
   File src = SD.open(srcPath, FILE_READ);
   if (!src) {
@@ -263,8 +282,10 @@ static void runIntake() {
 
       char srcPath[128];
       char dstPath[128];
+      char shortName[33];
       snprintf(srcPath, sizeof(srcPath), "%s/%s", sdFolder, items.items[i].name);
-      snprintf(dstPath, sizeof(dstPath), "%s/%s", iFolder, items.items[i].name);
+      truncateName(items.items[i].name, shortName, sizeof(shortName));
+      snprintf(dstPath, sizeof(dstPath), "%s/%s", iFolder, shortName);
 
       // Check free space
       if (items.items[i].size > istoreFreeBytes()) {
